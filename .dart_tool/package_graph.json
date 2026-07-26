@@ -8,6 +8,7 @@
       "version": "1.0.0",
       "dependencies": [],
       "devDependencies": [
+        "lints",
         "test"
       ]
     },
@@ -41,6 +42,11 @@
         "webkit_inspection_protocol",
         "yaml"
       ]
+    },
+    {
+      "name": "lints",
+      "version": "6.1.0",
+      "dependencies": []
     },
     {
       "name": "yaml",
