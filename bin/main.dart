@@ -99,12 +99,16 @@ Future<void> _listTasks(JsonTaskRepository repo) async {
   stdout.write('Choix du tri (1-3) : ');
   final sortChoice = stdin.readLineSync();
 
-  List<Task> sortedList = List.from(tasks);
+  // Fix 1: Typage générique explicite <Task>
+  final sortedList = List<Task>.from(tasks);
 
   if (sortChoice == '1') {
-    sortedList.sort((a, b) => b.priority.value.compareTo(a.priority.value));
+    // Fix 2: Annotations de types (Task a, Task b)
+    sortedList.sort((Task a, Task b) => b.priority.value.compareTo(a.priority.value));
   } else if (sortChoice == '2') {
-    sortedList.sort((a, b) {
+    // Fix 3: Prise en compte du cas où les deux dates sont nulles
+    sortedList.sort((Task a, Task b) {
+      if (a.dueDate == null && b.dueDate == null) return 0;
       if (a.dueDate == null) return 1;
       if (b.dueDate == null) return -1;
       return a.dueDate!.compareTo(b.dueDate!);
@@ -112,7 +116,7 @@ Future<void> _listTasks(JsonTaskRepository repo) async {
   }
 
   print('\n=== LISTE DES TÂCHES ===');
-  for (var t in sortedList) {
+  for (final t in sortedList) {
     final status = t.isCompleted ? '[✓]' : '[ ]';
     final dateStr = t.dueDate != null ? ' (Échéance: ${t.dueDate.toString().split(' ')[0]})' : '';
     print('$status ID: ${t.id} | [${t.getTaskType().toUpperCase()}] ${t.title} - Priorité: ${t.priority.name.toUpperCase()}$dateStr');

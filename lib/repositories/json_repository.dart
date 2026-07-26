@@ -1,75 +1,93 @@
 import 'dart:convert';
 import 'dart:io';
-import '../exceptions/custom_exceptions.dart';
-import '../interfaces/repository_interface.dart';
-import '../models/priority.dart';
-import '../models/standard_task.dart';
-import '../models/task.dart';
-import '../models/urgent_task.dart';
+import 'package:dart_task_cli/exceptions/custom_exceptions.dart';
+import 'package:dart_task_cli/interfaces/repository_interface.dart';
+import 'package:dart_task_cli/models/priority.dart';
+import 'package:dart_task_cli/models/standard_task.dart';
+import 'package:dart_task_cli/models/task.dart';
+import 'package:dart_task_cli/models/urgent_task.dart';
 
 class JsonTaskRepository implements Repository<Task> {
   final String filePath;
-  final List<Task> _tasks = [];
 
   JsonTaskRepository(this.filePath);
 
   Future<void> init() async {
     final file = File(filePath);
     if (!await file.exists()) {
-      await file.create(recursive: true);
-      await file.writeAsString('[]');
-    } else {
-      await _load();
+      await file.writeAsString(jsonEncode([]));
     }
   }
 
-  Future<void> _load() async {
+  Future<List<Task>> _readAllRaw() async {
     try {
       final file = File(filePath);
       final content = await file.readAsString();
-      if (content.trim().isEmpty) return;
+      final jsonList = jsonDecode(content) as List<dynamic>;
 
-      final List<dynamic> jsonList = jsonDecode(content);
-      _tasks.clear();
+      return jsonList.map((item) {
+        final map = item as Map<String, dynamic>;
+        final id = map['id'] as String;
+        final title = map['title'] as String;
+        final priorityStr = map['priority'] as String;
+        final priority = Priority.fromString(priorityStr);
+        final isCompleted = map['isCompleted'] as bool;
+        final type = map['type'] as String?;
+        final dueDateStr = map['dueDate'] as String?;
 
-      for (var item in jsonList) {
-        final String id = item['id'];
-        final String title = item['title'];
-        final Priority priority = Priority.fromString(item['priority']);
-        final DateTime? dueDate = item['dueDate'] != null ? DateTime.parse(item['dueDate']) : null;
-        final bool isCompleted = item['isCompleted'] ?? false;
-        final String type = item['type'] ?? 'Standard';
-
-        if (type == 'Urgent') {
-          _tasks.add(UrgentTask(
-            id: id,
-            title: title,
-            priority: priority,
-            dueDate: dueDate,
-            isCompleted: isCompleted,
-          ));
-        } else {
-          _tasks.add(StandardTask(
-            id: id,
-            title: title,
-            priority: priority,
-            dueDate: dueDate,
-            isCompleted: isCompleted,
-          ));
+        DateTime? dueDate;
+        if (dueDateStr != null) {
+          dueDate = DateTime.tryParse(dueDateStr);
         }
-      }
+
+        Task task;
+        if (type == 'Urgent' || priority == Priority.high) {
+          task = UrgentTask(
+            id: id,
+            title: title,
+            priority: priority,
+            dueDate: dueDate,
+            isCompleted: isCompleted,
+          );
+        } else {
+          task = StandardTask(
+            id: id,
+            title: title,
+            priority: priority,
+            dueDate: dueDate,
+            isCompleted: isCompleted,
+          );
+        }
+        return task;
+      }).toList();
     } catch (e) {
-      throw StorageException('Erreur lors de la lecture du fichier JSON : $e');
+      if (e is StorageException || e is TaskNotFoundException || e is InvalidInputException) {
+        rethrow;
+      }
+      throw StorageException('Erreur lors de la lecture du fichier JSON: $e');
+    }
+  }
+
+  Future<void> _writeAllRaw(List<Task> tasks) async {
+    try {
+      final file = File(filePath);
+      final jsonList = tasks.map((t) => t.toJson()).toList();
+      await file.writeAsString(jsonEncode(jsonList));
+    } catch (e) {
+      throw StorageException('Erreur lors de l\'écriture dans le fichier JSON: $e');
     }
   }
 
   @override
-  Future<List<Task>> getAll() async => List.unmodifiable(_tasks);
+  Future<List<Task>> getAll() async {
+    return await _readAllRaw();
+  }
 
   @override
   Future<Task?> getById(String id) async {
+    final tasks = await _readAllRaw();
     try {
-      return _tasks.firstWhere((t) => t.id == id);
+      return tasks.firstWhere((t) => t.id == id);
     } catch (_) {
       return null;
     }
@@ -77,38 +95,39 @@ class JsonTaskRepository implements Repository<Task> {
 
   @override
   Future<void> add(Task item) async {
-    _tasks.add(item);
-    await save();
+    final tasks = await _readAllRaw();
+    tasks.add(item);
+    await _writeAllRaw(tasks);
   }
 
   @override
   Future<void> update(Task item) async {
-    final index = _tasks.indexWhere((t) => t.id == item.id);
+    final tasks = await _readAllRaw();
+    final index = tasks.indexWhere((t) => t.id == item.id);
     if (index == -1) {
-      throw TaskNotFoundException('Impossible de mettre à jour. Tâche introuvable (ID: ${item.id}).');
+      throw TaskNotFoundException('Impossible de mettre à jour : tâche introuvable (ID: ${item.id})');
     }
-    _tasks[index] = item;
-    await save();
+    tasks[index] = item;
+    await _writeAllRaw(tasks);
   }
 
   @override
   Future<void> delete(String id) async {
-    final index = _tasks.indexWhere((t) => t.id == id);
-    if (index == -1) {
-      throw TaskNotFoundException('Impossible de supprimer. Tâche introuvable (ID: $id).');
+    final tasks = await _readAllRaw();
+    final initialLength = tasks.length;
+    tasks.removeWhere((t) => t.id == id);
+
+    if (tasks.length == initialLength) {
+      throw TaskNotFoundException('Impossible de supprimer : tâche introuvable (ID: $id)');
     }
-    _tasks.removeAt(index);
-    await save();
+
+    await _writeAllRaw(tasks);
   }
 
   @override
   Future<void> save() async {
-    try {
-      final file = File(filePath);
-      final jsonList = _tasks.map((t) => t.toJson()).toList();
-      await file.writeAsString(const JsonEncoder.withIndent('  ').convert(jsonList));
-    } catch (e) {
-      throw StorageException('Erreur lors de la sauvegarde JSON : $e');
-    }
+    // Méthode requise par l'interface Repository si présente
+    final tasks = await _readAllRaw();
+    await _writeAllRaw(tasks);
   }
 }
