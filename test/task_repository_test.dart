@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:dart_task_cli/models/priority.dart';
 import 'package:dart_task_cli/models/standard_task.dart';
-import 'package:dart_task_cli/models/urgent_task.dart';
 import 'package:dart_task_cli/repositories/json_repository.dart';
 import 'package:dart_task_cli/exceptions/custom_exceptions.dart';
 
@@ -22,44 +21,49 @@ void main() {
     }
   });
 
-  test('1. Ajouter une tâche et la récupérer', () async {
-    final task = StandardTask(id: '1', title: 'Test Task', priority: Priority.medium);
-    await repository.add(task);
+  group('Tests de l\'application CLI & Repository', () {
+    test('1. Ajout et stockage d\'une tâche', () async {
+      final task = StandardTask(id: '1', title: 'Faire les courses');
+      await repository.add(task);
 
-    final tasks = await repository.getAll();
-    expect(tasks.length, equals(1));
-    expect(tasks.first.title, equals('Test Task'));
-  });
+      final tasks = await repository.getAll();
+      expect(tasks.length, equals(1));
+      expect(tasks.first.title, equals('Faire les courses'));
+    });
 
-  test('2. Distinguer UrgentTask et StandardTask (Héritage & Abstraction)', () async {
-    final urgent = UrgentTask(id: '1', title: 'Tâche Urgente');
-    final standard = StandardTask(id: '2', title: 'Tâche Normale');
+    test('2. Modification d\'une tâche existante', () async {
+      final task = StandardTask(id: '2', title: 'Titre initial');
+      await repository.add(task);
 
-    expect(urgent.getTaskType(), equals('Urgent'));
-    expect(standard.getTaskType(), equals('Standard'));
-  });
+      final updatedTask = StandardTask(id: '2', title: 'Titre Modifié', priority: Priority.high);
+      await repository.update(updatedTask);
 
-  test('3. Marquer une tâche comme terminée', () async {
-    final task = StandardTask(id: '1', title: 'Faire les courses');
-    await repository.add(task);
+      final fetched = await repository.getById('2');
+      expect(fetched?.title, equals('Titre Modifié'));
+    });
 
-    task.isCompleted = true;
-    await repository.update(task);
+    test('3. Marquer une tâche comme terminée', () async {
+      final task = StandardTask(id: '3', title: 'Tâche à terminer');
+      await repository.add(task);
 
-    final updatedTask = await repository.getById('1');
-    expect(updatedTask?.isCompleted, isTrue);
-  });
+      task.isCompleted = true;
+      await repository.update(task);
 
-  test('4. Supprimer une tâche', () async {
-    final task = StandardTask(id: '1', title: 'A supprimer');
-    await repository.add(task);
+      final fetched = await repository.getById('3');
+      expect(fetched?.isCompleted, isTrue);
+    });
 
-    await repository.delete('1');
-    final tasks = await repository.getAll();
-    expect(tasks.isEmpty, isTrue);
-  });
+    test('4. Suppression d\'une tâche', () async {
+      final task = StandardTask(id: '4', title: 'À supprimer');
+      await repository.add(task);
 
-  test('5. Lever TaskNotFoundException lors de la suppression d\'un ID inexistant', () async {
-    expect(() => repository.delete('999'), throwsA(isA<TaskNotFoundException>()));
+      await repository.delete('4');
+      final tasks = await repository.getAll();
+      expect(tasks.isEmpty, isTrue);
+    });
+
+    test('5. Gestion d\'exception si tâche non trouvée', () async {
+      expect(() => repository.delete('999'), throwsA(isA<TaskNotFoundException>()));
+    });
   });
 }

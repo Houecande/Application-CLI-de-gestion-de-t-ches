@@ -9,23 +9,30 @@ import 'package:dart_task_cli/models/urgent_task.dart';
 
 class JsonTaskRepository implements Repository<Task> {
   final String filePath;
+  List<Task> _cachedTasks = [];
 
   JsonTaskRepository(this.filePath);
 
+  @override
   Future<void> init() async {
     final file = File(filePath);
     if (!await file.exists()) {
-      await file.writeAsString(jsonEncode([]));
+      try {
+        await file.writeAsString(jsonEncode([]));
+      } catch (e) {
+        throw StorageException('Impossible d\'initialiser le fichier de stockage : $e');
+      }
     }
+    await _readFromFile();
   }
 
-  Future<List<Task>> _readAllRaw() async {
+  Future<void> _readFromFile() async {
     try {
       final file = File(filePath);
       final content = await file.readAsString();
       final jsonList = jsonDecode(content) as List<dynamic>;
 
-      return jsonList.map((item) {
+      _cachedTasks = jsonList.map((item) {
         final map = item as Map<String, dynamic>;
         final id = map['id'] as String;
         final title = map['title'] as String;
@@ -40,9 +47,8 @@ class JsonTaskRepository implements Repository<Task> {
           dueDate = DateTime.tryParse(dueDateStr);
         }
 
-        Task task;
         if (type == 'Urgent' || priority == Priority.high) {
-          task = UrgentTask(
+          return UrgentTask(
             id: id,
             title: title,
             priority: priority,
@@ -50,7 +56,7 @@ class JsonTaskRepository implements Repository<Task> {
             isCompleted: isCompleted,
           );
         } else {
-          task = StandardTask(
+          return StandardTask(
             id: id,
             title: title,
             priority: priority,
@@ -58,36 +64,35 @@ class JsonTaskRepository implements Repository<Task> {
             isCompleted: isCompleted,
           );
         }
-        return task;
       }).toList();
     } catch (e) {
-      if (e is StorageException || e is TaskNotFoundException || e is InvalidInputException) {
-        rethrow;
-      }
-      throw StorageException('Erreur lors de la lecture du fichier JSON: $e');
+      if (e is StorageException || e is TaskNotFoundException || e is InvalidInputException) rethrow;
+      throw StorageException('Erreur de lecture du fichier JSON : $e');
     }
   }
 
-  Future<void> _writeAllRaw(List<Task> tasks) async {
+  @override
+  Future<void> save() async {
     try {
       final file = File(filePath);
-      final jsonList = tasks.map((t) => t.toJson()).toList();
+      final jsonList = _cachedTasks.map((t) => t.toJson()).toList();
       await file.writeAsString(jsonEncode(jsonList));
     } catch (e) {
-      throw StorageException('Erreur lors de l\'écriture dans le fichier JSON: $e');
+      throw StorageException('Erreur d\'écriture dans le fichier JSON : $e');
     }
   }
 
   @override
   Future<List<Task>> getAll() async {
-    return await _readAllRaw();
+    await _readFromFile();
+    return List.unmodifiable(_cachedTasks);
   }
 
   @override
   Future<Task?> getById(String id) async {
-    final tasks = await _readAllRaw();
+    await _readFromFile();
     try {
-      return tasks.firstWhere((t) => t.id == id);
+      return _cachedTasks.firstWhere((t) => t.id == id);
     } catch (_) {
       return null;
     }
@@ -95,39 +100,29 @@ class JsonTaskRepository implements Repository<Task> {
 
   @override
   Future<void> add(Task item) async {
-    final tasks = await _readAllRaw();
-    tasks.add(item);
-    await _writeAllRaw(tasks);
+    _cachedTasks.add(item);
+    await save();
   }
 
   @override
   Future<void> update(Task item) async {
-    final tasks = await _readAllRaw();
-    final index = tasks.indexWhere((t) => t.id == item.id);
+    final index = _cachedTasks.indexWhere((t) => t.id == item.id);
     if (index == -1) {
       throw TaskNotFoundException('Impossible de mettre à jour : tâche introuvable (ID: ${item.id})');
     }
-    tasks[index] = item;
-    await _writeAllRaw(tasks);
+    _cachedTasks[index] = item;
+    await save();
   }
 
   @override
   Future<void> delete(String id) async {
-    final tasks = await _readAllRaw();
-    final initialLength = tasks.length;
-    tasks.removeWhere((t) => t.id == id);
+    final initialLength = _cachedTasks.length;
+    _cachedTasks.removeWhere((t) => t.id == id);
 
-    if (tasks.length == initialLength) {
+    if (_cachedTasks.length == initialLength) {
       throw TaskNotFoundException('Impossible de supprimer : tâche introuvable (ID: $id)');
     }
 
-    await _writeAllRaw(tasks);
-  }
-
-  @override
-  Future<void> save() async {
-    // Méthode requise par l'interface Repository si présente
-    final tasks = await _readAllRaw();
-    await _writeAllRaw(tasks);
+    await save();
   }
 }
